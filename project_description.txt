@@ -1,0 +1,136 @@
+AI PDF CHATBOT — PROJECT DESCRIPTION
+=====================================
+
+OVERVIEW
+--------
+AI PDF Chatbot is a web application that lets users upload a PDF and ask natural-
+language questions about its content. Instead of sending the entire document to a
+language model on every question, the app uses Retrieval-Augmented Generation (RAG):
+it finds the most relevant sections first, then generates an answer grounded in those
+sections.
+
+The goal is accurate, document-specific Q&A — answers come from the uploaded PDF,
+not from the model's general knowledge.
+
+
+PIPELINE
+--------
+1. PDF Upload       -> User selects a PDF via the Streamlit file uploader
+2. Text Extraction  -> pypdf reads each page and extracts selectable text
+3. Chunking         -> Long text split into overlapping chunks (1000 chars, 200 overlap)
+4. Embedding        -> Each chunk converted to a vector (all-MiniLM-L6-v2)
+5. Vector Indexing  -> Embeddings stored in a FAISS index for fast similarity search
+6. User Query       -> User types a question in natural language
+7. Retrieval        -> Question embedded; FAISS returns top 3 most similar chunks
+8. Generation       -> Retrieved chunks passed as context to Google Gemini 2.5 Flash
+9. Response         -> Model answer and retrieved source chunks shown in the UI
+
+Data Flow:
+  User PDF -> Raw text -> Text chunks -> Embeddings -> FAISS index
+  User question -> Query embedding -> Similarity search -> Top 3 chunks
+  Prompt (context + question) -> Gemini -> Final answer
+
+
+ARCHITECTURE
+------------
+Pattern: Retrieval-Augmented Generation (RAG)
+
+  PDF -> Chunks -> Embeddings -> Vector DB -> Retrieval -> LLM -> Answer
+
+- Retrieval narrows context to relevant passages (reduces hallucination and token cost)
+- Generation produces a readable answer from that context
+- Grounding rules in the prompt tell the model not to invent facts outside the PDF
+
+
+TECH STACK
+----------
+
+Frontend / UI
+  - Streamlit          Web UI (file upload, text input, answers, previews)
+
+Document Processing
+  - pypdf              Read PDF files and extract text page by page
+  - LangChain Text Splitters   RecursiveCharacterTextSplitter for chunking
+
+Embeddings & Search
+  - Sentence Transformers      Local embedding model (all-MiniLM-L6-v2, 384-dim)
+  - FAISS (CPU)                In-memory vector index for nearest-neighbor search
+  - NumPy                      Array handling for embeddings
+
+LLM & API
+  - Google Gemini API          gemini-2.5-flash for answer generation
+  - google-genai               Official Python SDK for Gemini
+  - python-dotenv              Load GEMINI_API_KEY from environment
+
+
+KEY TECHNICAL DETAILS
+---------------------
+
+Chunking Strategy
+  - Chunk size: 1000 characters
+  - Overlap: 200 characters
+  - Overlap preserves context across chunk boundaries
+
+Embedding Model
+  - Model: all-MiniLM-L6-v2 (Sentence Transformers)
+  - Dimensions: 384
+  - Runs locally (no API cost for embeddings)
+
+Vector Search
+  - Index: faiss.IndexFlatL2 (exact L2 distance search)
+  - Top-k: 3 chunks per query
+  - Suitable for small/medium PDFs
+
+LLM Prompting
+  The model receives:
+  1. Retrieved PDF context (top 3 chunks)
+  2. The user's question
+  3. Rules: answer only from context, no hallucination, fallback if not found
+
+Environment
+  - API key stored in .env as GEMINI_API_KEY
+  - Loaded at startup via python-dotenv
+
+
+CORE DEPENDENCIES
+-----------------
+  streamlit
+  pypdf
+  langchain-text-splitters
+  sentence-transformers
+  faiss-cpu
+  numpy
+  google-genai
+  python-dotenv
+
+
+CURRENT CAPABILITIES
+--------------------
+  - Upload and process PDF documents
+  - Extract text from text-based PDFs
+  - Semantic search over document content
+  - AI-generated answers grounded in retrieved passages
+  - Display retrieved source chunks for transparency
+  - Preview extracted text and chunk metadata
+
+
+LIMITATIONS
+-----------
+  - Works best on text-based PDFs; scanned/image PDFs need OCR (not implemented)
+  - Single-document, single-turn Q&A (no persistent chat history yet)
+  - Index rebuilt on each Streamlit rerun (session caching not yet added)
+  - No page-level citations in answers yet
+
+
+ONE-LINER (Resume / GitHub)
+---------------------------
+AI PDF Chatbot — A Streamlit RAG app that extracts PDF text, embeds it with
+Sentence Transformers, indexes chunks in FAISS, and answers user questions via
+Google Gemini using retrieved context only.
+
+
+ELEVATOR PITCH
+--------------
+Upload any PDF, ask a question in plain English, and get an answer pulled directly
+from the document — powered by semantic search and Gemini, with source chunks
+shown so you can verify the response.
