@@ -1,5 +1,7 @@
 import os
 from dotenv import load_dotenv
+load_dotenv()
+
 from google import genai
 
 import streamlit as st
@@ -14,7 +16,7 @@ load_dotenv()
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-st.set_page_config(page_title="AI PDF Chatbot")
+
 
 st.title("AI PDF Chatbot")
 st.write("Upload a PDF and process its content.")
@@ -106,7 +108,7 @@ if uploaded_file is not None:
             """
 
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.6-flash",
                 contents=prompt
             )
 
