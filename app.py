@@ -17,6 +17,13 @@ client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
+if "pdf_file_id" not in st.session_state:
+    st.session_state.pdf_file_id = None
+    st.session_state.chunks = None
+    st.session_state.index = None
+    st.session_state.text = None
+    st.session_state.page_count = None
+    st.session_state.embedding_dim = None
 
 st.title("AI PDF Chatbot")
 st.write("Upload a PDF and process its content.")
@@ -30,62 +37,65 @@ if uploaded_file is not None:
 
     st.success(f"{uploaded_file.name} uploaded successfully!")
 
-    # Read PDF
-    pdf_reader = PdfReader(uploaded_file)
+    if uploaded_file.file_id != st.session_state.pdf_file_id:
+        pdf_reader = PdfReader(uploaded_file)
 
-    # Extract text
-    text = ""
+        text = ""
+        for page in pdf_reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
 
-    for page in pdf_reader.pages:
-        page_text = page.extract_text()
+        if not text.strip():
+            st.error("Could not extract text from this PDF.")
+            st.session_state.pdf_file_id = None
+            st.session_state.chunks = None
+            st.session_state.index = None
+            st.session_state.text = None
+            st.session_state.page_count = None
+            st.session_state.embedding_dim = None
+        else:
+            st.success("PDF text extracted successfully!")
 
-        if page_text:
-            text += page_text + "\n"
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=200
+            )
+            chunks = text_splitter.split_text(text)
 
-    # Check whether text was extracted
-    if not text.strip():
-        st.error("Could not extract text from this PDF.")
-    else:
-        st.success("PDF text extracted successfully!")
+            embeddings = embedding_model.encode(chunks)
+            embeddings = np.array(embeddings).astype("float32")
 
-        # Split text into chunks
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200
-        )
+            embedding_dimension = embeddings.shape[1]
+            index = faiss.IndexFlatL2(embedding_dimension)
+            index.add(embeddings)
 
-        chunks = text_splitter.split_text(text)
+            st.session_state.pdf_file_id = uploaded_file.file_id
+            st.session_state.chunks = chunks
+            st.session_state.index = index
+            st.session_state.text = text
+            st.session_state.page_count = len(pdf_reader.pages)
+            st.session_state.embedding_dim = embedding_dimension
 
-        embeddings = embedding_model.encode(chunks)
-        # Convert embeddings to NumPy array
-        embeddings = np.array(embeddings).astype("float32")
+            st.success(f"FAISS index created with {index.ntotal} vectors!")
+            st.success(f"Generated embeddings for {len(chunks)} chunks!")
+            st.success(f"PDF divided into {len(chunks)} text chunks.")
 
+    if st.session_state.chunks is not None and st.session_state.index is not None:
+        chunks = st.session_state.chunks
+        index = st.session_state.index
+        text = st.session_state.text
 
-        # Create FAISS index
-        embedding_dimension = embeddings.shape[1]
-
-        index = faiss.IndexFlatL2(embedding_dimension)
-        index.add(embeddings)
-
-        st.success(f"FAISS index created with {index.ntotal} vectors!")
         st.subheader("Test PDF Search")
 
         query = st.text_input("Ask something about your PDF:")
 
         if query:
-            # Convert question into an embedding
             query_embedding = embedding_model.encode([query])
-
-            # Convert to FAISS-compatible format
             query_embedding = np.array(query_embedding).astype("float32")
 
-            # Search FAISS for the most relevant chunks
             distances, indices = index.search(query_embedding, k=3)
-
-            # Retrieve the actual text chunks
             retrieved_chunks = [chunks[idx] for idx in indices[0]]
-
-            # Combine chunks into context for the AI model
             context = "\n\n".join(retrieved_chunks)
 
             prompt = f"""
@@ -122,22 +132,14 @@ if uploaded_file is not None:
                 st.write(chunk)
                 st.divider()
 
-        st.success(
-            f"Generated embeddings for {len(embeddings)} chunks!"
-        )
-
         st.write(
-            f"Embedding dimensions: {embeddings.shape[1]}"
+            f"Embedding dimensions: {st.session_state.embedding_dim}"
         )
 
-        st.success(f"PDF divided into {len(chunks)} text chunks.")
-
-        # Show basic information
-        st.write(f"**Pages:** {len(pdf_reader.pages)}")
+        st.write(f"**Pages:** {st.session_state.page_count}")
         st.write(f"**Characters extracted:** {len(text)}")
         st.write(f"**Text chunks created:** {len(chunks)}")
 
-        # Preview
         with st.expander("Preview extracted text"):
             st.write(text[:3000])
 
