@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from google import genai
+from google.genai import errors as genai_errors
 
 import streamlit as st
 from pypdf import PdfReader
@@ -24,6 +25,10 @@ if "pdf_file_id" not in st.session_state:
     st.session_state.text = None
     st.session_state.page_count = None
     st.session_state.embedding_dim = None
+    st.session_state.messages = []
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
 st.title("AI PDF Chatbot")
 st.write("Upload a PDF and process its content.")
@@ -76,6 +81,7 @@ if uploaded_file is not None:
             st.session_state.text = text
             st.session_state.page_count = len(pdf_reader.pages)
             st.session_state.embedding_dim = embedding_dimension
+            st.session_state.messages = []
 
             st.success(f"FAISS index created with {index.ntotal} vectors!")
             st.success(f"Generated embeddings for {len(chunks)} chunks!")
@@ -86,9 +92,17 @@ if uploaded_file is not None:
         index = st.session_state.index
         text = st.session_state.text
 
-        st.subheader("Test PDF Search")
+        st.subheader("Chat")
 
-        query = st.text_input("Ask something about your PDF:")
+        if st.button("Clear Chat"):
+            st.session_state.messages = []
+            st.rerun()
+
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.write(message["content"])
+
+        query = st.chat_input("Ask something about your PDF:")
 
         if query:
             query_embedding = embedding_model.encode([query])
@@ -117,20 +131,36 @@ if uploaded_file is not None:
             - Give a clear and simple answer.
             """
 
-            response = client.models.generate_content(
-                model="gemini-3.6-flash",
-                contents=prompt
-            )
-
-            st.subheader("Answer")
-            st.write(response.text)
-
-            st.subheader("Retrieved PDF Context")
-
-            for i, chunk in enumerate(retrieved_chunks):
-                st.write(f"### Result {i + 1}")
-                st.write(chunk)
-                st.divider()
+            try:
+                response = client.models.generate_content(
+                    model="gemini-3.6-flash",
+                    contents=prompt
+                )
+            except genai_errors.APIError as e:
+                if e.code in (429, 503) or (
+                    e.status and str(e.status).upper() in ("UNAVAILABLE", "RESOURCE_EXHAUSTED")
+                ):
+                    st.warning(
+                        "The AI service is temporarily unavailable due to high demand. "
+                        "Please try again in a moment."
+                    )
+                else:
+                    st.error(
+                        f"Could not generate an answer. Gemini API error ({e.code}): "
+                        f"{e.message or 'Please try again.'}"
+                    )
+            except Exception as e:
+                st.error(f"Could not generate an answer. Please try again. ({e})")
+            else:
+                answer = response.text
+                if not answer:
+                    st.warning("The AI returned an empty response. Please try again.")
+                else:
+                    st.session_state.messages.append({"role": "user", "content": query})
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": answer}
+                    )
+                    st.rerun()
 
         st.write(
             f"Embedding dimensions: {st.session_state.embedding_dim}"
